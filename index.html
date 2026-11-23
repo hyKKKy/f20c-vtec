@@ -158,6 +158,7 @@
   <div class="ctl"><label>Вид</label><div class="seg" id="viewSeg"></div></div>
   <div class="ctl"><label>Камера</label><div class="seg" id="camSeg"></div></div>
   <div class="ctl"><label>VTEC</label><div class="seg" id="vtecSeg"></div></div>
+  <div class="ctl"><label>Звук двигателя</label><div class="seg" id="packSeg"></div></div>
   <div class="ctl"><label>&nbsp;</label>
     <div class="row">
       <button id="cover">Крышка</button>
@@ -532,13 +533,20 @@ function setView(mode) {
 // Положите в папку sounds/ записи на ровных оборотах (.mp3/.wav/.ogg/.m4a).
 // rpm — обороты, на которых сделана запись; по ним подстраивается высота тона.
 // load: 'on' — под газом, 'off' — сброс газа, 'any' — в обоих слоях. Файлов *_off может не быть.
-const SAMPLES = [
-  { name: 'idle', rpm: 2200, load: 'any' },
-  { name: 'mid', rpm: 5000, load: 'on' },
-  { name: 'high', rpm: 8000, load: 'on' },
-  { name: 'mid_off', rpm: 4500, load: 'off' },
-  { name: 'high_off', rpm: 8000, load: 'off' },
-];
+const PACKS = {
+  bay: [   // моторный отсек: впуск с индивидуальными дросселями, разгон и сброс газа
+    { name: 'idle', rpm: 2200, load: 'any' },
+    { name: 'mid', rpm: 5000, load: 'on' },
+    { name: 'high', rpm: 8000, load: 'on' },
+    { name: 'mid_off', rpm: 4500, load: 'off' },
+    { name: 'high_off', rpm: 8000, load: 'off' },
+  ],
+  cabin: [ // салон S2000: настоящий холостой 900, звук глуше
+    { name: 'idle', rpm: 900, load: 'any' },
+    { name: 'mid', rpm: 5000, load: 'on' },
+    { name: 'high', rpm: 8000, load: 'on' },
+  ],
+};
 // бесшовная петля: конец клипа плавно перетекает в начало
 function makeLoop(ctx, buf) {
   const sr = buf.sampleRate;
@@ -554,7 +562,7 @@ function makeLoop(ctx, buf) {
 }
 
 const audio = {
-  ready: false, enabled: false, mode: 'synth', samples: null,
+  ready: false, enabled: false, mode: 'synth', samples: null, pack: 'bay', cache: {},
   init() {
     const ctx = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.out = ctx.createGain();
@@ -613,14 +621,15 @@ const audio = {
     this.sampleBus = ctx.createGain(); this.sampleBus.gain.value = 0;
     this.sampleLp.connect(this.sampleBus).connect(this.out);
     this.ready = true;
-    this.loadSamples();
+    this.setPack(this.pack);
   },
-  async loadSamples() {
+  async loadPack(pack) {
+    if (this.cache[pack]) return this.cache[pack];
     const ctx = this.ctx, found = [];
-    for (const s of SAMPLES) {
+    for (const s of PACKS[pack]) {
       for (const ext of ['mp3', 'wav', 'ogg', 'm4a']) {
         try {
-          const r = await fetch(`sounds/${s.name}.${ext}`);
+          const r = await fetch(`sounds/${pack}/${s.name}.${ext}`);
           if (!r.ok) continue;
           const buf = await ctx.decodeAudioData(await r.arrayBuffer());
           found.push({ ...s, buf: makeLoop(ctx, buf) });
@@ -628,8 +637,27 @@ const audio = {
         } catch (e) { /* нет файла или не декодируется — пробуем следующий */ }
       }
     }
-    if (!found.length) return;
     found.sort((a, b) => a.rpm - b.rpm);
+    return (this.cache[pack] = found);
+  },
+  stopSamples() {
+    const t = this.ctx.currentTime;
+    for (const s of this.samples || []) {
+      s.g.gain.cancelScheduledValues(t);
+      s.g.gain.setTargetAtTime(0, t, 0.02);   // короткое затухание вместо щелчка
+      try { s.src.stop(t + 0.15); } catch (e) { /* уже остановлен */ }
+    }
+    this.samples = null;
+    this.mode = 'synth';
+  },
+  async setPack(pack) {
+    this.pack = pack;
+    if (!this.ready) return;
+    const found = pack === 'synth' ? [] : await this.loadPack(pack);
+    if (this.pack !== pack) return;   // пока грузили, выбрали другой набор
+    this.stopSamples();
+    if (!found.length) { this.onMode && this.onMode(); return; }
+    const ctx = this.ctx;
     this.samples = found.map(s => {
       const src = ctx.createBufferSource();
       src.buffer = s.buf;
@@ -809,6 +837,7 @@ makeSeg('speedSeg', SPEEDS, timeScale, v => { timeScale = v; syncSeg('speedSeg',
 makeSeg('viewSeg', VIEWS, viewMode, setView);
 makeSeg('camSeg', CAMS, camName, v => camPreset(v));
 makeSeg('vtecSeg', [['auto', 'Авто'], ['off', 'Выкл'], ['on', 'Вкл']], vtecMode, v => { vtecMode = v; syncSeg('vtecSeg', v); });
+makeSeg('packSeg', [['bay', 'Отсек'], ['cabin', 'Салон'], ['synth', 'Синтез']], 'bay', v => { syncSeg('packSeg', v); audio.setPack(v); });
 
 const orderEl = $('order');
 for (const n of FIRING) {
@@ -852,6 +881,7 @@ function toggleSound() {
 }
 function soundLabel() {
   const src = audio.mode === 'sample' ? 'запись' : 'синтез';
+  syncSeg('packSeg', audio.pack);
   soundBtn.textContent = audio.enabled ? `Звук: ${src}` : 'Звук: выкл';
   soundBtn.classList.toggle('on', audio.enabled);
 }
