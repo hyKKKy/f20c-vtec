@@ -528,9 +528,30 @@ function setView(mode) {
   syncSeg('viewSeg', mode);
 }
 
-// ───────────────────────────── звук (синтез, Web Audio) ─────────────────────────────
+// ───────────────────────────── звук: записи из sounds/ или синтез ─────────────────────────────
+// Положите в папку sounds/ записи на ровных оборотах: idle, mid, high (.mp3/.wav/.ogg/.m4a).
+// rpm — обороты, на которых сделана запись; по ним подстраивается высота тона.
+const SAMPLES = [
+  { name: 'idle', rpm: 900 },
+  { name: 'mid', rpm: 4000 },
+  { name: 'high', rpm: 8000 },
+];
+// бесшовная петля: конец клипа плавно перетекает в начало
+function makeLoop(ctx, buf) {
+  const sr = buf.sampleRate;
+  const X = Math.min(Math.floor(sr * 0.12), Math.floor(buf.length / 4));
+  const len = buf.length - X;
+  const out = ctx.createBuffer(buf.numberOfChannels, len, sr);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const a = buf.getChannelData(c), o = out.getChannelData(c);
+    o.set(a.subarray(0, len));
+    for (let i = 0; i < X; i++) { const t = i / X; o[i] = a[i] * Math.sqrt(t) + a[len + i] * Math.sqrt(1 - t); }
+  }
+  return out;
+}
+
 const audio = {
-  ready: false, enabled: false,
+  ready: false, enabled: false, mode: 'synth', samples: null,
   init() {
     const ctx = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.out = ctx.createGain();
@@ -569,7 +590,9 @@ const audio = {
     this.lp = ctx.createBiquadFilter(); this.lp.type = 'lowpass';
     this.peak = ctx.createBiquadFilter(); this.peak.type = 'peaking'; this.peak.Q.value = 1.4;
     this.hs = ctx.createBiquadFilter(); this.hs.type = 'highshelf'; this.hs.frequency.value = 3200;
-    this.pre.connect(shaper).connect(this.lp).connect(this.peak).connect(this.hs).connect(this.out);
+    this.synthBus = ctx.createGain();
+    this.synthBus.connect(this.out);
+    this.pre.connect(shaper).connect(this.lp).connect(this.peak).connect(this.hs).connect(this.synthBus);
 
     // шум впуска и «выстрелы» в выпуске
     const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
@@ -578,11 +601,44 @@ const audio = {
     const noise = () => { const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.start(); return s; };
     this.bp = ctx.createBiquadFilter(); this.bp.type = 'bandpass'; this.bp.Q.value = 0.8;
     this.ng = ctx.createGain(); this.ng.gain.value = 0;
-    noise().connect(this.bp).connect(this.ng).connect(this.out);
+    noise().connect(this.bp).connect(this.ng).connect(this.synthBus);
     const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 700;
     this.cg = ctx.createGain(); this.cg.gain.value = 0;
     noise().connect(hp).connect(this.cg).connect(this.out);
+
+    this.sampleLp = ctx.createBiquadFilter(); this.sampleLp.type = 'lowpass'; this.sampleLp.Q.value = 0.5;
+    this.sampleBus = ctx.createGain(); this.sampleBus.gain.value = 0;
+    this.sampleLp.connect(this.sampleBus).connect(this.out);
     this.ready = true;
+    this.loadSamples();
+  },
+  async loadSamples() {
+    const ctx = this.ctx, found = [];
+    for (const s of SAMPLES) {
+      for (const ext of ['mp3', 'wav', 'ogg', 'm4a']) {
+        try {
+          const r = await fetch(`sounds/${s.name}.${ext}`);
+          if (!r.ok) continue;
+          const buf = await ctx.decodeAudioData(await r.arrayBuffer());
+          found.push({ ...s, buf: makeLoop(ctx, buf) });
+          break;
+        } catch (e) { /* нет файла или не декодируется — пробуем следующий */ }
+      }
+    }
+    if (!found.length) return;
+    found.sort((a, b) => a.rpm - b.rpm);
+    this.samples = found.map(s => {
+      const src = ctx.createBufferSource();
+      src.buffer = s.buf;
+      src.loop = true;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      src.connect(g).connect(this.sampleLp);
+      src.start(0, Math.random() * s.buf.duration);
+      return { ...s, src, g };
+    });
+    this.mode = 'sample';
+    this.onMode && this.onMode();
   },
   update(rpm, thr, vtec, cut, live) {
     if (!this.ready) return;
@@ -601,7 +657,24 @@ const audio = {
     set(this.hs.gain, vtec * 6);
     set(this.bp.frequency, 250 + rpm * 0.28 + vtec * 900);
     set(this.ng.gain, (0.015 + thr * 0.09) * (1 + vtec * 1.5));
-    let level = live && this.enabled ? 0.22 + 0.4 * rpm / LIMIT + 0.18 * thr : 0;
+    const rec = this.mode === 'sample';
+    set(this.synthBus.gain, rec ? 0 : 1, 0.1);
+    if (rec) {
+      // соседние по оборотам записи смешиваются с равной мощностью, тон тянется под текущие обороты
+      const S = this.samples;
+      let i = 0;
+      while (i < S.length - 1 && rpm > S[i + 1].rpm) i++;
+      const a = S[i], b = S[Math.min(i + 1, S.length - 1)];
+      const k = a === b ? 0 : clamp((rpm - a.rpm) / (b.rpm - a.rpm), 0, 1);
+      for (const s of S) {
+        const w = s === a && s === b ? 1 : s === a ? Math.cos(k * Math.PI / 2) : s === b ? Math.sin(k * Math.PI / 2) : 0;
+        set(s.g.gain, w, 0.03);
+        set(s.src.playbackRate, clamp(rpm / s.rpm, 0.4, 2.5), 0.02);
+      }
+      set(this.sampleLp.frequency, 1400 + thr * 9000 + rpm * 0.6 + vtec * 3000, 0.04);
+      set(this.sampleBus.gain, 1);
+    }
+    let level = live && this.enabled ? (rec ? 0.75 + 0.25 * thr : 0.22 + 0.4 * rpm / LIMIT + 0.18 * thr) : 0;
     if (cut) level *= 0.3;
     set(this.out.gain, level, cut ? 0.006 : 0.04);
   },
@@ -759,10 +832,15 @@ function toggleSound() {
   if (!audio.ready) audio.init();
   audio.ctx.resume();
   audio.enabled = !audio.enabled;
-  soundBtn.textContent = audio.enabled ? 'Звук: вкл' : 'Звук: выкл';
   soundBtn.classList.remove('hint');
+  soundLabel();
+}
+function soundLabel() {
+  const src = audio.mode === 'sample' ? 'запись' : 'синтез';
+  soundBtn.textContent = audio.enabled ? `Звук: ${src}` : 'Звук: выкл';
   soundBtn.classList.toggle('on', audio.enabled);
 }
+audio.onMode = soundLabel;
 soundBtn.addEventListener('click', toggleSound);
 $('phasesBtn').addEventListener('click', () => { $('right').classList.toggle('open'); $('phasesBtn').classList.toggle('on'); });
 
