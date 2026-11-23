@@ -87,6 +87,15 @@
   .seg button.on { background: rgba(255, 255, 255, .15); color: #fff; }
   #hint { position: fixed; left: 50%; transform: translateX(-50%); bottom: 4px; color: rgba(255, 255, 255, .28); font-size: 10.5px; white-space: nowrap; pointer-events: none; }
   #phasesBtn { display: none; }
+  #tip {
+    display: none; pointer-events: none; z-index: 5; width: max-content; max-width: 290px;
+    padding: 9px 11px; border-radius: 10px; border-color: rgba(255, 154, 26, .45);
+  }
+  #tip b { display: block; font-size: 13.5px; margin-bottom: 3px; color: #ffcf7a; }
+  #tip span { display: block; color: var(--text); font-size: 12px; line-height: 1.45; }
+  #tip small { display: block; color: var(--dim); font-size: 11px; margin-top: 5px; }
+  #tip small:empty { display: none; }
+  #explode { border-color: rgba(255, 154, 26, .5); }
   @media (max-width: 860px) {
     #left { top: 8px; left: 8px; right: 8px; width: auto; padding: 8px 10px; }
     #left .grid, #left .pins, #left .sub { display: none; }
@@ -161,6 +170,7 @@
   <div class="ctl"><label>Звук двигателя</label><div class="seg" id="packSeg"></div></div>
   <div class="ctl"><label>&nbsp;</label>
     <div class="row">
+      <button id="explode">Разобрать</button>
       <button id="cover">Крышка</button>
       <button id="pause">Пауза</button>
       <button id="sound" class="hint">Звук: выкл</button>
@@ -168,7 +178,8 @@
     </div>
   </div>
 </div>
-<div id="hint">W / ↑ — газ · R2 геймпада — газ · Пробел — пауза · V — вид · C — камера · 1–4 — цилиндр · M — звук</div>
+<div id="hint">Наведите на деталь — подпись · E — разобрать · W / ↑ — газ · Пробел — пауза · V — вид · C — камера · 1–4 — цилиндр · M — звук</div>
+<div id="tip" class="panel" role="status" aria-live="polite"><b id="tipName"></b><span id="tipText"></span><small id="tipLive"></small></div>
 
 <script type="module">
 import * as THREE from 'three';
@@ -226,7 +237,7 @@ controls.target.set(0, 1.3, 0);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance = 1.0;
-controls.maxDistance = 18;
+controls.maxDistance = 32;
 
 scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x1a1d22, 0.7));
 const keyLight = new THREE.DirectionalLight(0xffffff, 2.3);
@@ -328,33 +339,51 @@ class Helix extends THREE.Curve {
   }
 }
 
+// ───────────────────────────── подписи и узлы для разборки ─────────────────────────────
+// каждая деталь (или узел из нескольких мешей) получает ключ из PARTS и общий pid для подсветки
+const partMeshes = new Map();
+function tag(obj, part, info = {}) {
+  const pid = obj.uuid;
+  obj.traverse(o => {
+    if (!o.isMesh) return;
+    o.userData = { part, pid, mat0: o.userData.mat0 || o.material, ...info };
+    if (!partMeshes.has(pid)) partMeshes.set(pid, []);
+    partMeshes.get(pid).push(o);
+  });
+  return obj;
+}
+const group = (parent = root) => { const g = new THREE.Group(); parent.add(g); return g; };
+const EX = { pan: group(), head: group(), pistons: group(), rods: group() };
+
 // ───────────────────────────── блок, ГБЦ, поддон ─────────────────────────────
 {
   const s = new THREE.Shape();
   s.moveTo(-64, DECK); s.lineTo(64, DECK); s.lineTo(64, 70); s.lineTo(90, 10);
   s.lineTo(90, -55); s.lineTo(-90, -55); s.lineTo(-90, 10); s.lineTo(-64, 70); s.closePath();
-  mesh(extrudeX(s, BL), housing.block);
+  tag(mesh(extrudeX(s, BL), housing.block), 'block');
   for (const n of CYLS) {
     const h = DECK - 92;
-    mesh(new THREE.CylinderGeometry(BORE / 2 + 0.6, BORE / 2 + 0.6, h, 48, 1, true), housing.liner, cylX(n), 92 + h / 2, 0);
+    tag(mesh(new THREE.CylinderGeometry(BORE / 2 + 0.6, BORE / 2 + 0.6, h, 48, 1, true), housing.liner, cylX(n), 92 + h / 2, 0), 'liner', { cyl: n });
   }
   // поддон
   const p = new THREE.Shape();
   p.moveTo(-86, -55); p.lineTo(86, -55); p.lineTo(78, -118); p.lineTo(-78, -118); p.closePath();
-  mesh(extrudeX(p, BL - 20), housing.pan);
+  tag(mesh(extrudeX(p, BL - 20), housing.pan, 0, 0, 0, EX.pan), 'pan');
   // ГБЦ
-  mesh(box(BL, 72, 216), housing.head, 0, DECK + 36, 0);
-  mesh(box(10, 100, 216), housing.head, -BL / 2 + 5, DECK + 122, 0);
-  mesh(box(10, 100, 216), housing.head, BL / 2 - 5, DECK + 122, 0);
-  mesh(box(BL, 54, 10), housing.head, 0, DECK + 99, -103);
-  mesh(box(BL, 54, 10), housing.head, 0, DECK + 99, 103);
+  const hd = group(EX.head);
+  mesh(box(BL, 72, 216), housing.head, 0, DECK + 36, 0, hd);
+  mesh(box(10, 100, 216), housing.head, -BL / 2 + 5, DECK + 122, 0, hd);
+  mesh(box(10, 100, 216), housing.head, BL / 2 - 5, DECK + 122, 0, hd);
+  mesh(box(BL, 54, 10), housing.head, 0, DECK + 99, -103, hd);
+  mesh(box(BL, 54, 10), housing.head, 0, DECK + 99, 103, hd);
+  tag(hd, 'head');
 }
 
 // свечные колодцы и катушки
 for (const n of CYLS) {
-  mesh(new THREE.CylinderGeometry(11, 11, 172, 24), M.alu, cylX(n), DECK + 92, 0);
-  mesh(box(30, 26, 40), M.plug, cylX(n), DECK + 190, 0);
-  mesh(new THREE.CylinderGeometry(2, 2, 8, 8), M.steel, cylX(n), DECK + 9, 0);
+  tag(mesh(new THREE.CylinderGeometry(11, 11, 172, 24), M.alu, cylX(n), DECK + 92, 0, EX.head), 'plugTube', { cyl: n });
+  tag(mesh(box(30, 26, 40), M.plug, cylX(n), DECK + 190, 0, EX.head), 'coil', { cyl: n });
+  tag(mesh(new THREE.CylinderGeometry(2, 2, 8, 8), M.steel, cylX(n), DECK + 9, 0, EX.head), 'plug', { cyl: n });
 }
 
 // клапанная крышка (по умолчанию снята)
@@ -366,6 +395,7 @@ root.add(coverG);
   s.lineTo(-80, 62); s.quadraticCurveTo(-100, 60, -104, 46); s.closePath();
   mesh(extrudeX(s, BL + 6), housing.cover, 0, DECK + 126, 0, coverG);
   mesh(box(BL - 50, 8, 52), M.plug, 0, DECK + 190, 0, coverG);
+  tag(coverG, 'cover');
   coverG.visible = false;
 }
 
@@ -394,16 +424,21 @@ root.add(crank);
     mesh(cylXGeo(27.5, right - left), M.steel, (left + right) / 2, 0, 0, crank);
   }
   mesh(cylXGeo(19, 52), M.steel, -BL / 2 - 30, 0, 0, crank);
-  mesh(cylXGeo(72, 24, 64), M.dark, -BL / 2 - 56, 0, 0, crank);
-  mesh(cylXGeo(40, 28, 48), M.forged, -BL / 2 - 56, 0, 0, crank);
-  mesh(box(6, 14, 6), M.mark, -BL / 2 - 69, 64, 0, crank);
-  mesh(cylXGeo(140, 22, 72), M.forged, BL / 2 + 18, 0, 0, crank);
-  mesh(cylXGeo(143, 14, 72), M.dark, BL / 2 + 18, 0, 0, crank);
+  tag(crank, 'crank');
+  const pulley = group(crank);
+  mesh(cylXGeo(72, 24, 64), M.dark, -BL / 2 - 56, 0, 0, pulley);
+  mesh(cylXGeo(40, 28, 48), M.forged, -BL / 2 - 56, 0, 0, pulley);
+  mesh(box(6, 14, 6), M.mark, -BL / 2 - 69, 64, 0, pulley);
+  tag(pulley, 'pulley');
+  const fly = group(crank);
+  mesh(cylXGeo(140, 22, 72), M.forged, BL / 2 + 18, 0, 0, fly);
+  mesh(cylXGeo(143, 14, 72), M.dark, BL / 2 + 18, 0, 0, fly);
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
-    mesh(cylXGeo(5, 24, 12), M.dark, BL / 2 + 19, Math.cos(a) * 44, Math.sin(a) * 44, crank);
+    mesh(cylXGeo(5, 24, 12), M.dark, BL / 2 + 19, Math.cos(a) * 44, Math.sin(a) * 44, fly);
   }
-  mesh(box(8, 18, 8), M.mark, BL / 2 + 30, 128, 0, crank);
+  mesh(box(8, 18, 8), M.mark, BL / 2 + 30, 128, 0, fly);
+  tag(fly, 'flywheel');
 }
 
 // ───────────────────────────── поршни и шатуны ─────────────────────────────
@@ -413,19 +448,23 @@ for (const n of CYLS) {
   pistonMats[n] = pm;
   const p = new THREE.Group();
   p.position.set(cylX(n), 0, 0);
-  root.add(p);
+  EX.pistons.add(p);
   mesh(new THREE.CylinderGeometry(BORE / 2 - 0.6, BORE / 2 - 0.6, 50, 48), pm, 0, 6, 0, p);
-  for (const y of [25, 20.5, 16]) mesh(new THREE.CylinderGeometry(BORE / 2 - 0.3, BORE / 2 - 0.3, 1.6, 48), M.ring, 0, y, 0, p);
-  mesh(cylXGeo(10, 62, 20), M.steel, 0, 0, 0, p);
+  tag(p, 'piston', { cyl: n });
+  const rings = group(p);
+  for (const y of [25, 20.5, 16]) mesh(new THREE.CylinderGeometry(BORE / 2 - 0.3, BORE / 2 - 0.3, 1.6, 48), M.ring, 0, y, 0, rings);
+  tag(rings, 'ring', { cyl: n });
+  tag(mesh(cylXGeo(10, 62, 20), M.steel, 0, 0, 0, p), 'wristpin', { cyl: n });
   pistons[n] = p;
 
   const r = new THREE.Group();
-  root.add(r);
+  EX.rods.add(r);
   mesh(cylXGeo(31, 22, 36), M.forged, 0, 0, 0, r);
   mesh(cylXGeo(15, 22, 28), M.forged, 0, ROD, 0, r);
   const beam = new THREE.CylinderGeometry(7, 11, ROD - 40, 4).rotateY(Math.PI / 4);
   mesh(beam, M.forged, 0, ROD / 2, 0, r);
   mesh(box(30, 6, 66), M.forged, 0, 26, 0, r);
+  tag(r, 'rod', { cyl: n });
   rods[n] = r;
 }
 
@@ -450,6 +489,7 @@ const lobeGeo = {
 const springGeo = new THREE.TubeGeometry(new Helix(11, 55, 6.5), 220, 1.7, 6, false);
 const units = { in: {}, ex: {} };
 const shaftMats = {};
+const sideGroups = [];
 
 for (const side of ['in', 'ex']) {
   const s = side === 'in' ? -1 : 1;            // впуск со стороны −Z, выпуск +Z
@@ -457,12 +497,15 @@ for (const side of ['in', 'ex']) {
   g.position.set(0, DECK + SEAT_Y, s * SEAT_Z);
   g.rotation.x = s * TILT;
   root.add(g);
+  // узлы для разборки (в наклонной системе стороны: +Y — вдоль оси клапана)
+  const camG = group(g), rkG = group(g), vG = group(g);
+  sideGroups.push({ s, camG, rkG, vG });
 
-  mesh(cylXGeo(12.5, BL + 30, 28), M.cam, 0, CAM_Y, s * PAD_Z, g);              // распредвал
+  tag(mesh(cylXGeo(12.5, BL + 30, 28), M.cam, 0, CAM_Y, s * PAD_Z, camG), 'cam', { side });   // распредвал
   const sm = std(0xb8bec6, 0.9, 0.3, { emissive: 0x000000 });
   shaftMats[side] = sm;
-  mesh(cylXGeo(6, BL + 10, 20), sm, 0, PIV_Y, s * PIV_Z, g);                       // ось коромысел (масляный канал VTEC)
-  for (let k = 0; k <= 4; k++) mesh(box(16, 42, 44), M.alu, (k - 2) * PITCH, CAM_Y, s * PAD_Z, g); // постели
+  tag(mesh(cylXGeo(6, BL + 10, 20), sm, 0, PIV_Y, s * PIV_Z, rkG), 'rockerShaft', { side }); // ось коромысел (масляный канал VTEC)
+  for (let k = 0; k <= 4; k++) tag(mesh(box(16, 42, 44), M.alu, (k - 2) * PITCH, CAM_Y, s * PAD_Z, camG), 'camcap', { side }); // постели
 
   for (const n of CYLS) {
     const cx = cylX(n);
@@ -472,36 +515,139 @@ for (const side of ['in', 'ex']) {
     for (const j of [-1, 1]) {
       const vg = new THREE.Group();
       vg.position.set(cx + j * VX, 0, 0);
-      g.add(vg);
+      vG.add(vg);
       const headR = side === 'in' ? 15.5 : 13;
       const vm = side === 'in' ? M.valveIn : M.valveEx;
       mesh(new THREE.CylinderGeometry(5, headR, 6, 32), vm, 0, 3, 0, vg);
       mesh(new THREE.CylinderGeometry(2.8, 2.8, TIP_Y, 12), vm, 0, TIP_Y / 2, 0, vg);
-      mesh(new THREE.CylinderGeometry(11, 8, 5, 24), M.steel, 0, 97.5, 0, vg);
+      tag(vg, 'valve', { side, cyl: n, u });
+      tag(mesh(new THREE.CylinderGeometry(11, 8, 5, 24), M.steel, 0, 97.5, 0, vg), 'retainer', { side, cyl: n });
       u.valves.push(vg);
-      mesh(new THREE.CylinderGeometry(13, 13, 2, 24), M.dark, cx + j * VX, 39, 0, g);
-      u.springs.push(mesh(springGeo, M.spring, cx + j * VX, 40, 0, g));
+      tag(mesh(new THREE.CylinderGeometry(13, 13, 2, 24), M.dark, cx + j * VX, 39, 0, vG), 'spring', { side, cyl: n });
+      u.springs.push(tag(mesh(springGeo, M.spring, cx + j * VX, 40, 0, vG), 'spring', { side, cyl: n }));
     }
 
     // три коромысла: основное, среднее (под «злым» кулачком), вторичное
     [-VX, 0, VX].forEach((dx, i) => {
       const pv = new THREE.Group();
       pv.position.set(cx + dx, PIV_Y, s * PIV_Z);
-      g.add(pv);
+      rkG.add(pv);
       const mat = i === 1 ? M.rockerMid : M.rocker;
       mesh(box(13, 10, PIV_Z), mat, 0, 0, -s * PIV_Z / 2, pv);
       mesh(cylXGeo(9, 13, 20), mat, 0, 0, 0, pv);
-      mesh(cylXGeo(7, 9, 20), M.steel, 0, 12, -s * PAD_Z, pv);
-      if (i < 2) u.pins.push(mesh(cylXGeo(3.8, 13, 16), M.pin, 0, 0, -s * 34, pv));
+      tag(pv, i === 1 ? 'rockerMid' : 'rocker', { side, cyl: n, u });
+      tag(mesh(cylXGeo(7, 9, 20), M.steel, 0, 12, -s * PAD_Z, pv), 'roller', { side, cyl: n });
+      if (i < 2) u.pins.push(tag(mesh(cylXGeo(3.8, 13, 16), M.pin, 0, 0, -s * 34, pv), 'pin', { side, cyl: n, u }));
       u.rk.push(pv);
     });
 
     // кулачки: низкий — высокий — низкий
     [['low', -VX], ['high', 0], ['low', VX]].forEach(([k, dx]) => {
-      u.lobes.push({ m: mesh(lobeGeo[side][k], M.cam, cx + dx, CAM_Y, s * PAD_Z, g), p: PROF[side][k] });
+      const m = tag(mesh(lobeGeo[side][k], M.cam, cx + dx, CAM_Y, s * PAD_Z, camG), k === 'high' ? 'lobeHigh' : 'lobeLow', { side, cyl: n });
+      u.lobes.push({ m, p: PROF[side][k] });
     });
     units[side][n] = u;
   }
+}
+
+// ───────────────────────────── разборка ─────────────────────────────
+// смещения узлов в разобранном виде (мм); у клапанного механизма — в наклонной системе стороны
+function applyExplode(e) {
+  EX.pan.position.y = -210 * e;
+  crank.position.y = -130 * e;
+  EX.pistons.position.set(0, 40 * e, 250 * e);
+  EX.rods.position.set(0, 40 * e, 250 * e);
+  EX.head.position.y = 200 * e;
+  coverG.position.y = 590 * e;
+  for (const { s, camG, rkG, vG } of sideGroups) {
+    vG.position.set(0, 250 * e, 0);
+    rkG.position.set(0, 340 * e, s * 50 * e);
+    camG.position.set(0, 430 * e, s * 115 * e);
+  }
+  gasGroup.visible = viewMode !== 'solid' && e < 0.02;
+}
+
+// ───────────────────────────── описания деталей ─────────────────────────────
+const PARTS = {
+  block: ['Блок цилиндров', 'Алюминиевый корпус двигателя: четыре цилиндра, опоры коленвала, каналы для масла и охлаждающей жидкости.'],
+  liner: ['Гильза цилиндра', 'Рабочая поверхность, по которой скользит поршень. Диаметр цилиндра 87 мм.'],
+  pan: ['Масляный поддон', 'Запас моторного масла. Отсюда насос гонит масло к подшипникам, распредвалам и штифтам VTEC.'],
+  head: ['Головка блока цилиндров (ГБЦ)', 'Закрывает цилиндры сверху. В ней камеры сгорания, впускные и выпускные каналы, клапаны и постели распредвалов.'],
+  plugTube: ['Свечной колодец', 'Канал в центре ГБЦ между распредвалами: через него свеча достаёт до камеры сгорания.'],
+  coil: ['Катушка зажигания', 'Своя на каждый цилиндр. Превращает 12 В бортовой сети в десятки киловольт для искры.'],
+  plug: ['Свеча зажигания', 'Поджигает смесь в конце такта сжатия, чуть раньше верхней мёртвой точки (в модели — за 12°).'],
+  cover: ['Клапанная крышка', 'Закрывает распредвалы и коромысла и не даёт маслу разлетаться. Снимается кнопкой «Крышка».'],
+  crank: ['Коленчатый вал', 'Превращает ход поршней во вращение. Вал плоский: шейки 1-го и 4-го цилиндров с одной стороны, 2-го и 3-го — с другой. Противовесы гасят инерцию.'],
+  pulley: ['Шкив коленвала', 'Через ремень крутит навесное оборудование. Белая метка — для выставления зажигания.'],
+  flywheel: ['Маховик', 'Тяжёлый диск: сглаживает рывки между вспышками и передаёт крутящий момент на сцепление.'],
+  piston: ['Поршень', 'Принимает давление газов и толкает шатун. На 9000 об/мин его средняя скорость около 25 м/с.'],
+  ring: ['Поршневые кольца', 'Верхние компрессионные держат давление в камере, нижнее маслосъёмное снимает масло со стенок цилиндра.'],
+  wristpin: ['Поршневой палец', 'Шарнир между поршнем и верхней головкой шатуна.'],
+  rod: ['Шатун', 'Связывает поршень с коленвалом. Длина 153 мм при ходе поршня 84 мм.'],
+  cam: [['Впускной распредвал', 'Выпускной распредвал'], 'Крутится вдвое медленнее коленвала. На каждый цилиндр три кулачка: два низкого профиля по краям и высокий VTEC посередине.'],
+  camcap: ['Постель распредвала', 'Крышка подшипника: прижимает распредвал к ГБЦ.'],
+  lobeLow: ['Кулачок низкого профиля', 'Ведёт клапаны примерно до 6000 об/мин: меньше подъём и короче фаза, поэтому ровный холостой и тяга внизу.'],
+  lobeHigh: ['Кулачок высокого профиля (VTEC)', 'Больше подъём и длиннее фаза открытия. Пока VTEC выключен, под ним вхолостую качается среднее коромысло.'],
+  rocker: ['Коромысло', 'Рычаг между кулачком и клапаном: передаёт и увеличивает ход кулачка. Крайние коромысла давят на клапаны.'],
+  rockerMid: ['Среднее коромысло VTEC', 'Стоит под высоким кулачком и клапанов не касается. Когда штифты сцепляют его с соседними, клапаны идут по высокому профилю.'],
+  pin: ['Стопорный штифт VTEC', 'Давление масла выдвигает штифт, и он сцепляет три коромысла в одно. Сдвигается только когда коромысла на базовой окружности кулачка.'],
+  roller: ['Ролик коромысла', 'Катится по кулачку вместо скольжения и снижает трение.'],
+  rockerShaft: ['Ось коромысел', 'На ней качаются коромысла. Внутри масляный канал к штифтам VTEC: при давлении ось подсвечивается синим.'],
+  valve: [['Впускной клапан', 'Выпускной клапан'], ['Впускает в цилиндр воздух с топливом. По два на цилиндр.', 'Выпускает отработавшие газы. Тарелка меньше, чем у впускного.']],
+  retainer: ['Тарелка пружины', 'Держит пружину на стержне клапана.'],
+  spring: ['Клапанная пружина', 'Закрывает клапан, когда кулачок уходит. На 9000 об/мин должна успевать, иначе клапан «зависнет».'],
+};
+const pickSide = (v, side) => (Array.isArray(v) ? v[side === 'ex' ? 1 : 0] : v);
+const fmtMM = v => v.toFixed(1).replace('.', ',');
+function liveLine(d) {
+  const parts = [];
+  if (d.cyl) {
+    const a = mod(theta - OFFSET[d.cyl], 720);
+    parts.push(`Цилиндр ${d.cyl} · ${STROKES[Math.floor(a / 180)]}`);
+  }
+  if (d.part === 'valve') parts.push(`подъём ${fmtMM(d.u.vl)} мм`);
+  if (d.part === 'pin' || d.part === 'rockerMid') parts.push(d.u.p > 0.5 ? 'коромысла сцеплены (VTEC)' : 'коромысла свободны');
+  return parts.join(' · ');
+}
+
+// подсветка детали под курсором
+const hlCache = new Map();
+let hlPid = null;
+function hlMat(m) {
+  let h = hlCache.get(m);
+  if (!h) {
+    h = m.clone();
+    h.emissive = new THREE.Color(0xff9a1a);
+    h.emissiveIntensity = 0.5;
+    hlCache.set(m, h);
+  }
+  return h;
+}
+function setHighlight(pid) {
+  if (pid === hlPid) return;
+  if (hlPid) for (const o of partMeshes.get(hlPid)) o.material = o.userData.mat0;
+  hlPid = pid;
+  if (pid) for (const o of partMeshes.get(pid)) o.material = hlMat(o.userData.mat0);
+}
+
+const housingSet = new Set(Object.values(housing));
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const shown = o => { for (let p = o; p; p = p.parent) if (!p.visible) return false; return true; };
+function pickPart(x, y) {
+  const r = canvas.getBoundingClientRect();
+  ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  for (const h of raycaster.intersectObject(root, true)) {
+    const o = h.object, d = o.userData;
+    if (!d.part || !shown(o)) continue;
+    if (housingSet.has(d.mat0)) {
+      if (viewMode === 'glass') continue;                      // сквозь стекло — к внутренним деталям
+      if (viewMode === 'section' && h.point.z > 1e-4) continue; // срезанная половина
+    }
+    return { mesh: o };
+  }
+  return null;
 }
 
 // ───────────────────────────── режимы отображения ─────────────────────────────
@@ -510,6 +656,8 @@ const VIEWS = [['solid', 'Сплошной'], ['section', 'Разрез'], ['gla
 let viewMode = 'section';
 function setView(mode) {
   viewMode = mode;
+  setHighlight(null);
+  hlCache.clear();
   const glass = mode === 'glass', sec = mode === 'section';
   for (const [k, m] of Object.entries(housing)) {
     m.transparent = glass;
@@ -740,6 +888,7 @@ let paused = false, selCyl = 1, vtecMode = 'auto', camName = 'overview';
 const SPEEDS = [[1, '1×'], [1 / 8, '1/8'], [1 / 40, '1/40'], [1 / 200, '1/200']];
 let timeScale = 1 / 40;
 let lastHighThr = -1e9;
+let explodeT = 0, explodeTarget = 0;
 
 // ───────────────────────────── обновление механики ─────────────────────────────
 const cA = new THREE.Color(), cB = new THREE.Color();
@@ -811,7 +960,7 @@ function updateEngine(dTheta) {
   }
   const fp = new THREE.Vector3(cylX(flashCyl) * MM, (DECK + 2) * MM, 0);
   flashLight.position.copy(fp);
-  flashLight.intensity = viewMode === 'solid' ? 0 : flashMax * 6;
+  flashLight.intensity = viewMode === 'solid' || explodeT > 0.02 ? 0 : flashMax * 6;
 }
 
 // ───────────────────────────── интерфейс ─────────────────────────────
@@ -866,6 +1015,44 @@ pedal.addEventListener('pointerup', pedalOff);
 pedal.addEventListener('pointercancel', pedalOff);
 pedal.addEventListener('contextmenu', e => e.preventDefault());
 
+const explodeBtn = $('explode');
+function toggleExplode() {
+  explodeTarget = explodeTarget ? 0 : 1;
+  explodeBtn.textContent = explodeTarget ? 'Собрать' : 'Разобрать';
+  explodeBtn.classList.toggle('on', !!explodeTarget);
+  camPreset(explodeTarget ? 'exploded' : 'overview');
+}
+explodeBtn.addEventListener('click', toggleExplode);
+
+// подсказка: наведение мышью или тап по детали (тап закрепляет подсказку)
+const tip = $('tip');
+let pointer = null, pinned = null, downAt = null;
+canvas.addEventListener('pointermove', e => { pointer = e.buttons ? null : { x: e.clientX, y: e.clientY }; });
+canvas.addEventListener('pointerleave', () => { pointer = null; });
+canvas.addEventListener('pointerdown', e => { downAt = { x: e.clientX, y: e.clientY }; });
+canvas.addEventListener('pointerup', e => {
+  if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 6) return;
+  const hit = pickPart(e.clientX, e.clientY);
+  pinned = hit ? { ...hit, x: e.clientX, y: e.clientY } : null;
+});
+function updateTip() {
+  let cur = pinned;
+  if (!cur && pointer) { const h = pickPart(pointer.x, pointer.y); cur = h && { ...h, x: pointer.x, y: pointer.y }; }
+  setHighlight(cur ? cur.mesh.userData.pid : null);
+  if (!cur) { tip.style.display = 'none'; return; }
+  const d = cur.mesh.userData, [name, text] = PARTS[d.part];
+  $('tipName').textContent = pickSide(name, d.side);
+  $('tipText').textContent = pickSide(text, d.side);
+  $('tipLive').textContent = liveLine(d);
+  tip.style.display = 'block';
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = cur.x + 16, y = cur.y + 16;
+  if (x + w > window.innerWidth - 8) x = cur.x - w - 16;
+  if (y + h > window.innerHeight - 8) y = cur.y - h - 16;
+  tip.style.left = Math.max(8, x) + 'px';
+  tip.style.top = Math.max(8, y) + 'px';
+}
+
 const coverBtn = $('cover');
 coverBtn.addEventListener('click', () => { coverG.visible = !coverG.visible; coverBtn.classList.toggle('on', coverG.visible); });
 const pauseBtn = $('pause');
@@ -896,6 +1083,8 @@ window.addEventListener('keydown', e => {
   else if (e.code === 'KeyV') setView(nextOf(VIEWS, viewMode));
   else if (e.code === 'KeyC') camPreset(nextOf(CAMS, camName));
   else if (e.code === 'KeyM') toggleSound();
+  else if (e.code === 'KeyE') toggleExplode();
+  else if (e.code === 'Escape') pinned = null;
   else if (/^Digit[1-4]$/.test(e.code)) selectCyl(+e.code.slice(5));
 });
 window.addEventListener('keyup', e => { if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.up = false; });
@@ -913,18 +1102,29 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
 function flyTo(pos, tgt) { tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: tgt, k: 0 }; }
 controls.addEventListener('start', () => { tween = null; });
 function camPreset(name) {
+  if (name !== 'exploded' && explodeTarget) {   // обычные ракурсы — для собранного двигателя
+    explodeTarget = 0;
+    explodeBtn.textContent = 'Разобрать';
+    explodeBtn.classList.remove('on');
+  }
   camName = name;
   syncSeg('camSeg', name);
   const cx = cylX(selCyl) * MM;
   if (name === 'overview') flyTo(V(7.0, 4.6, 9.2), V(0, 1.3, 0));
   else if (name === 'head') flyTo(V(2.4, 6.4, 4.0), V(0, 3.6, 0));
   else if (name === 'vtec') {
-    const t = new THREE.Vector3();
-    units.in[selCyl].rk[1].getWorldPosition(t);
+    // точка среднего коромысла в собранном положении (узел может быть ещё в полёте)
+    const t = new THREE.Vector3(), pv = units.in[selCyl].rk[1], rkG = pv.parent, saved = rkG.position.clone();
+    rkG.position.set(0, 0, 0);
+    rkG.updateMatrixWorld(true);
+    pv.getWorldPosition(t);
+    rkG.position.copy(saved);
+    rkG.updateMatrixWorld(true);
     flyTo(t.clone().add(V(1.35, 1.9, 1.25)), t.clone().add(V(0, 0.05, 0)));
   }
   else if (name === 'side') flyTo(V(-10.5, 1.8, 0.8), V(0, 1.4, 0));
   else if (name === 'bottom') flyTo(V(cx + 1.6, -0.5, 3.4), V(cx, 0.6, 0));
+  else if (name === 'exploded') flyTo(V(12.6, 8.0, 19.2), V(0, 2.9, 0.8));
 }
 
 // тахометр
@@ -1094,6 +1294,10 @@ function tick(now) {
   const dTheta = paused ? 0 : (rpm / 60) * 360 * dt * timeScale;
   theta += dTheta;
   updateEngine(dTheta);
+  if (explodeT !== explodeTarget || explodeT > 0) {
+    explodeT = approach(explodeT, explodeTarget, dt / 1.3);
+    applyExplode(explodeT < 0.5 ? 4 * explodeT ** 3 : 1 - (-2 * explodeT + 2) ** 3 / 2);
+  }
   for (const s of ['in', 'ex']) shaftMats[s].emissive.setRGB(0.05 * vtecSmooth, 0.25 * vtecSmooth, 0.7 * vtecSmooth);
   audio.update(rpm, thrSmooth, vtecSmooth, cut, !paused);
 
@@ -1108,7 +1312,7 @@ function tick(now) {
   renderer.render(scene, camera);
 
   uiAcc += dt;
-  if (uiAcc > 1 / 30) { uiAcc = 0; updateUI(); }
+  if (uiAcc > 1 / 30) { uiAcc = 0; updateUI(); updateTip(); }
   requestAnimationFrame(tick);
 }
 
