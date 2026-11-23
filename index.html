@@ -1,0 +1,998 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>F20C · DOHC VTEC</title>
+<meta name="description" content="Интерактивная 3D-модель рядной четвёрки F20C с DOHC VTEC в одном HTML-файле: обороты, переключение кулачков, фазы, звук.">
+<style>
+  :root {
+    --bg: #0a0c0f;
+    --panel: rgba(14, 17, 22, .80);
+    --line: rgba(255, 255, 255, .09);
+    --line2: rgba(255, 255, 255, .18);
+    --text: #e9edf2;
+    --dim: #8b95a3;
+    --red: #e8323a;
+    --amber: #ffb21e;
+    --in: #4ea8ff;
+    --ex: #ff7a45;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden; -webkit-font-smoothing: antialiased;
+  }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  .panel {
+    position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    padding: 12px 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+  }
+  #left { top: 14px; left: 14px; width: 300px; }
+  #right { top: 14px; right: 14px; width: 344px; }
+  #controls {
+    left: 50%; transform: translateX(-50%); bottom: 14px;
+    display: flex; gap: 14px 18px; align-items: flex-end; flex-wrap: wrap; justify-content: center;
+    width: max-content; max-width: calc(100vw - 28px); padding: 10px 14px;
+  }
+  .title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; letter-spacing: .02em; }
+  .title .code { background: var(--red); color: #fff; padding: 1px 7px; border-radius: 5px; font-size: 14px; }
+  .sub { color: var(--dim); font-size: 11.5px; margin: 3px 0 8px; }
+  canvas.ui { width: 100%; display: block; }
+  .rpmrow { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; }
+  .rpm { font: 600 34px/1 ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: -.02em; transition: color .05s; }
+  .rpm.cut { color: var(--red); }
+  .rpm small { font: 500 11px system-ui, sans-serif; color: var(--dim); margin-left: 6px; letter-spacing: 0; }
+  .lamp {
+    font: 800 15px/1 system-ui, sans-serif; letter-spacing: .14em; padding: 7px 10px; border-radius: 7px;
+    border: 1px solid #3a3020; color: #5d4c2a; background: #17130c; transition: background .06s, color .06s, box-shadow .06s;
+  }
+  .lamp.on { color: #1b1200; background: var(--amber); border-color: var(--amber); box-shadow: 0 0 20px rgba(255, 178, 30, .55); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-top: 10px; }
+  .grid label { display: block; color: var(--dim); font-size: 11px; }
+  .grid b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pins { margin-top: 12px; display: grid; grid-template-columns: 58px repeat(4, 1fr); gap: 5px 6px; align-items: center; font-size: 11px; color: var(--dim); }
+  .pins .h { text-align: center; }
+  .dot { width: 13px; height: 13px; border-radius: 50%; margin: auto; background: #262b33; border: 1px solid var(--line2); }
+  .sec-title { color: var(--dim); font-size: 11px; margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .chips { display: flex; gap: 6px; }
+  .chip {
+    flex: 1; font: 700 15px/1 ui-monospace, Consolas, monospace; padding: 8px 0; text-align: center;
+    border-radius: 8px; border: 1px solid var(--line); background: rgba(255, 255, 255, .04); color: var(--dim); cursor: pointer;
+  }
+  .chip.sel { border-color: var(--line2); color: var(--text); background: rgba(255, 255, 255, .1); }
+  .chip.fire { box-shadow: inset 0 -3px 0 var(--ex); color: #fff; }
+  .stroke { margin: 10px 0 6px; font-size: 13px; }
+  .stroke b { font-weight: 700; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--dim); font-size: 11px; margin-top: 4px; }
+  .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+  .ctl { display: flex; flex-direction: column; gap: 5px; }
+  .ctl > label { color: var(--dim); font-size: 11px; display: flex; justify-content: space-between; gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  input[type=range] { width: 170px; accent-color: var(--red); }
+  button {
+    font: inherit; color: var(--text); background: rgba(255, 255, 255, .06); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: rgba(255, 255, 255, .1); }
+  button.on { background: rgba(255, 255, 255, .16); border-color: var(--line2); }
+  #pedal { background: var(--red); border-color: var(--red); color: #fff; font-weight: 700; padding: 6px 14px; user-select: none; -webkit-user-select: none; touch-action: none; }
+  #pedal.down { filter: brightness(1.25); transform: translateY(1px); }
+  #sound.hint { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(232, 50, 58, .35); } }
+  .seg { display: flex; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
+  .seg button { border: 0; background: transparent; color: var(--dim); padding: 5px 9px; border-radius: 7px; }
+  .seg button.on { background: rgba(255, 255, 255, .15); color: #fff; }
+  #hint { position: fixed; left: 50%; transform: translateX(-50%); bottom: 4px; color: rgba(255, 255, 255, .28); font-size: 10.5px; white-space: nowrap; pointer-events: none; }
+  #phasesBtn { display: none; }
+  @media (max-width: 860px) {
+    #left { top: 8px; left: 8px; right: 8px; width: auto; padding: 8px 10px; }
+    #left .grid, #left .pins, #left .sub { display: none; }
+    #right { display: none; top: auto; bottom: 190px; left: 8px; right: 8px; width: auto; }
+    #right.open { display: block; }
+    #phasesBtn { display: inline-block; }
+    #controls { left: 8px; right: 8px; transform: none; width: auto; bottom: 8px; gap: 8px 10px; max-height: 36vh; overflow: auto; justify-content: flex-start; padding: 8px 10px; }
+    .ctl > label { font-size: 10px; }
+    .seg button { padding: 4px 7px; }
+    #hint { display: none; }
+    input[type=range] { width: 130px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="left" class="panel">
+  <div class="title"><span class="code">F20C</span> DOHC VTEC</div>
+  <div class="sub">2.0 л · рядная четвёрка · 16 клапанов · отсечка 9000 об/мин</div>
+  <canvas id="tach" class="ui" width="560" height="104"></canvas>
+  <div class="rpmrow">
+    <div class="rpm" id="rpmBox"><span id="rpm">900</span><small>об/мин</small></div>
+    <div class="lamp" id="lamp">VTEC</div>
+  </div>
+  <div class="grid">
+    <div><label>Угол коленвала</label><b id="crankA">0°</b></div>
+    <div><label>Ср. скорость поршня</label><b id="mps">0 м/с</b></div>
+    <div><label>Профиль кулачков</label><b id="camMode">низкий</b></div>
+    <div><label>Масло к штифтам</label><b id="oil">нет давления</b></div>
+  </div>
+  <div class="pins" id="pins">
+    <span></span><span class="h">1</span><span class="h">2</span><span class="h">3</span><span class="h">4</span>
+    <span>Штифты вп.</span><span class="dot" data-s="in" data-n="1"></span><span class="dot" data-s="in" data-n="2"></span><span class="dot" data-s="in" data-n="3"></span><span class="dot" data-s="in" data-n="4"></span>
+    <span>Штифты вып.</span><span class="dot" data-s="ex" data-n="1"></span><span class="dot" data-s="ex" data-n="2"></span><span class="dot" data-s="ex" data-n="3"></span><span class="dot" data-s="ex" data-n="4"></span>
+  </div>
+</div>
+
+<div id="right" class="panel">
+  <div class="sec-title"><span>Порядок работы</span><span>нажмите на цилиндр</span></div>
+  <div class="chips" id="order"></div>
+  <div class="stroke">Цилиндр <b id="selCyl">1</b>: <span id="strokeName">рабочий ход</span></div>
+  <canvas id="lift" class="ui" width="640" height="300"></canvas>
+  <div class="legend">
+    <span><i style="background:var(--in)"></i>впуск</span>
+    <span><i style="background:var(--ex)"></i>выпуск</span>
+    <span>яркая линия — кулачок, который сейчас ведёт клапан</span>
+  </div>
+  <div class="grid">
+    <div><label>Подъём впуск / выпуск</label><b id="lifts">0 / 0 мм</b></div>
+    <div><label>Перекрытие клапанов</label><b id="overlap">0°</b></div>
+  </div>
+</div>
+
+<div id="controls" class="panel">
+  <div class="ctl">
+    <label><span>Газ</span><span id="thrVal">0%</span></label>
+    <div class="row"><input type="range" id="thr" min="0" max="100" value="0"><button id="pedal">Газ ▲</button></div>
+  </div>
+  <div class="ctl"><label>Замедление анимации</label><div class="seg" id="speedSeg"></div></div>
+  <div class="ctl"><label>Вид</label><div class="seg" id="viewSeg"></div></div>
+  <div class="ctl"><label>Камера</label><div class="seg" id="camSeg"></div></div>
+  <div class="ctl"><label>VTEC</label><div class="seg" id="vtecSeg"></div></div>
+  <div class="ctl"><label>&nbsp;</label>
+    <div class="row">
+      <button id="cover">Крышка</button>
+      <button id="pause">Пауза</button>
+      <button id="sound" class="hint">Звук: выкл</button>
+      <button id="phasesBtn">Фазы</button>
+    </div>
+  </div>
+</div>
+<div id="hint">W / ↑ — газ · R2 геймпада — газ · Пробел — пауза · V — вид · C — камера · 1–4 — цилиндр · M — звук</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ───────────────────────────── параметры двигателя (мм) ─────────────────────────────
+const DEG = Math.PI / 180;
+const MM = 0.01;                         // 1 мм = 0.01 единицы сцены
+const BORE = 87, STROKE = 84, R = STROKE / 2, ROD = 153, COMP_H = 31, PITCH = 97;
+const DECK = R + ROD + COMP_H + 0.8;     // плоскость блока над осью коленвала
+const IDLE = 900, LIMIT = 9000, VTEC_ON = 6000, VTEC_OFF = 5800;
+const FIRING = [1, 3, 4, 2];
+const OFFSET = { 1: 0, 3: 180, 4: 360, 2: 540 };   // сдвиг цикла по порядку работы
+const CYLS = [1, 2, 3, 4];
+const cylX = n => (n - 2.5) * PITCH;
+const BL = 4 * PITCH + 44;               // длина блока
+
+// клапанный механизм (локальная система одной стороны ГБЦ, y = 0 — седло клапана)
+const TILT = 13 * DEG, SEAT_Y = 7, SEAT_Z = 20, VX = 17;
+const TIP_Y = 105, PIV_Y = 110, PIV_Z = 48, PAD_Z = 24, CAM_BASE = 17, RATIO = 2;
+const CAM_Y = PIV_Y + 12 + 7 + CAM_BASE; // ролик касается базовой окружности
+// профили кулачков: c — центр (град. коленвала в цикле 0–720), d — длительность, L — подъём клапана
+const PROF = {
+  in: { low: { c: 472, d: 230, L: 8.0 }, high: { c: 465, d: 290, L: 11.5 } },
+  ex: { low: { c: 250, d: 230, L: 7.5 }, high: { c: 255, d: 285, L: 10.5 } },
+};
+const IGN = 708;                         // зажигание за 12° до ВМТ
+
+const mod = (a, m) => ((a % m) + m) % m;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const profile = u => (Math.abs(u) >= 1 ? 0 : 0.5 + 0.5 * Math.cos(Math.PI * u));
+function lift(p, a) {
+  const d = mod(a - p.c + 360, 720) - 360;
+  return p.L * profile(d / (p.d / 2));
+}
+
+// ───────────────────────────── сцена ─────────────────────────────
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.localClippingEnabled = true;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0c0f);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(34, 1, 0.05, 200);
+camera.position.set(7.0, 4.6, 9.2);
+const controls = new OrbitControls(camera, canvas);
+controls.target.set(0, 1.3, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 1.0;
+controls.maxDistance = 18;
+
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x1a1d22, 0.7));
+const keyLight = new THREE.DirectionalLight(0xffffff, 2.3);
+keyLight.position.set(5, 9, 7);
+scene.add(keyLight);
+const rimLight = new THREE.DirectionalLight(0x8fb0ff, 1.1);
+rimLight.position.set(-7, 4, -6);
+scene.add(rimLight);
+const flashLight = new THREE.PointLight(0xff9a3c, 0, 3, 1.2);
+scene.add(flashLight);
+
+const root = new THREE.Group();
+root.scale.setScalar(MM);
+scene.add(root);
+
+// пол: мягкая тень и сетка
+{
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 256;
+  const g = cv.getContext('2d');
+  const grd = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  grd.addColorStop(0, 'rgba(0,0,0,.7)');
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 256, 256);
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(9, 5),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = -1.59;
+  scene.add(shadow);
+  const grid = new THREE.GridHelper(16, 32, 0x1d232b, 0x151a20);
+  grid.position.y = -1.6;
+  scene.add(grid);
+}
+
+// ───────────────────────────── материалы ─────────────────────────────
+const std = (c, m, r, extra = {}) => new THREE.MeshStandardMaterial({ color: c, metalness: m, roughness: r, ...extra });
+const M = {
+  steel: std(0xc3c9d1, 0.95, 0.28),
+  forged: std(0x7c8592, 0.9, 0.38),
+  alu: std(0xaab2bb, 0.7, 0.4),
+  ring: std(0x2b2f35, 0.8, 0.5),
+  cam: std(0xd9dee4, 1.0, 0.22),
+  rocker: std(0x9aa4ae, 0.85, 0.35),
+  rockerMid: std(0xd2d7dd, 0.9, 0.28),
+  pin: std(0xffb21e, 0.5, 0.35, { emissive: 0x5a3400 }),
+  valveIn: std(0xc9d0d8, 0.95, 0.25),
+  valveEx: std(0xb59d82, 0.9, 0.35),
+  spring: std(0x3a78d8, 0.6, 0.35),
+  dark: std(0x2a2e35, 0.6, 0.6),
+  plug: std(0x16181c, 0.3, 0.7),
+  mark: std(0xffffff, 0.2, 0.4, { emissive: 0x444444 }),
+};
+const housing = {
+  block: std(0x6f7782, 0.45, 0.6),
+  liner: std(0x8d949d, 0.7, 0.4),
+  head: std(0x99a1aa, 0.55, 0.5),
+  pan: std(0x4d545e, 0.5, 0.55),
+  cover: std(0xb3121b, 0.25, 0.72),
+};
+
+// ───────────────────────────── геометрия-помощники ─────────────────────────────
+function mesh(geo, mat, x = 0, y = 0, z = 0, parent = root) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  parent.add(m);
+  return m;
+}
+const cylXGeo = (r, h, seg = 32) => new THREE.CylinderGeometry(r, r, h, seg).rotateZ(Math.PI / 2);
+const box = (x, y, z) => new THREE.BoxGeometry(x, y, z);
+function extrudeX(shape, len, curveSegments = 24) {
+  const g = new THREE.ExtrudeGeometry(shape, { depth: len, bevelEnabled: false, curveSegments });
+  g.translate(0, 0, -len / 2);
+  g.rotateY(Math.PI / 2);
+  return g;
+}
+// кулачок: радиус = база + подъём; «нос» смотрит вниз (на ролик) при нулевом повороте
+function lobeGeometry(p, width) {
+  const camLift = p.L / RATIO, half = (p.d / 4) * DEG;
+  const shape = new THREE.Shape();
+  const N = 200;
+  for (let i = 0; i < N; i++) {
+    const psi = (i / N) * Math.PI * 2 - Math.PI;
+    const r = CAM_BASE + camLift * profile(psi / half);
+    const x = r * Math.sin(psi), y = -r * Math.cos(psi);
+    i ? shape.lineTo(x, y) : shape.moveTo(x, y);
+  }
+  shape.closePath();
+  const g = new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: true, bevelThickness: 0.6, bevelSize: 0.6, bevelSegments: 2 });
+  g.translate(0, 0, -width / 2);
+  g.rotateY(Math.PI / 2);
+  return g;
+}
+class Helix extends THREE.Curve {
+  constructor(r, h, turns) { super(); this.r = r; this.h = h; this.turns = turns; }
+  getPoint(t, target = new THREE.Vector3()) {
+    const a = t * Math.PI * 2 * this.turns;
+    return target.set(Math.cos(a) * this.r, t * this.h, Math.sin(a) * this.r);
+  }
+}
+
+// ───────────────────────────── блок, ГБЦ, поддон ─────────────────────────────
+{
+  const s = new THREE.Shape();
+  s.moveTo(-64, DECK); s.lineTo(64, DECK); s.lineTo(64, 70); s.lineTo(90, 10);
+  s.lineTo(90, -55); s.lineTo(-90, -55); s.lineTo(-90, 10); s.lineTo(-64, 70); s.closePath();
+  mesh(extrudeX(s, BL), housing.block);
+  for (const n of CYLS) {
+    const h = DECK - 92;
+    mesh(new THREE.CylinderGeometry(BORE / 2 + 0.6, BORE / 2 + 0.6, h, 48, 1, true), housing.liner, cylX(n), 92 + h / 2, 0);
+  }
+  // поддон
+  const p = new THREE.Shape();
+  p.moveTo(-86, -55); p.lineTo(86, -55); p.lineTo(78, -118); p.lineTo(-78, -118); p.closePath();
+  mesh(extrudeX(p, BL - 20), housing.pan);
+  // ГБЦ
+  mesh(box(BL, 72, 216), housing.head, 0, DECK + 36, 0);
+  mesh(box(10, 100, 216), housing.head, -BL / 2 + 5, DECK + 122, 0);
+  mesh(box(10, 100, 216), housing.head, BL / 2 - 5, DECK + 122, 0);
+  mesh(box(BL, 54, 10), housing.head, 0, DECK + 99, -103);
+  mesh(box(BL, 54, 10), housing.head, 0, DECK + 99, 103);
+}
+
+// свечные колодцы и катушки
+for (const n of CYLS) {
+  mesh(new THREE.CylinderGeometry(11, 11, 172, 24), M.alu, cylX(n), DECK + 92, 0);
+  mesh(box(30, 26, 40), M.plug, cylX(n), DECK + 190, 0);
+  mesh(new THREE.CylinderGeometry(2, 2, 8, 8), M.steel, cylX(n), DECK + 9, 0);
+}
+
+// клапанная крышка (по умолчанию снята)
+const coverG = new THREE.Group();
+root.add(coverG);
+{
+  const s = new THREE.Shape();
+  s.moveTo(-112, 0); s.lineTo(112, 0); s.lineTo(104, 46); s.quadraticCurveTo(100, 60, 80, 62);
+  s.lineTo(-80, 62); s.quadraticCurveTo(-100, 60, -104, 46); s.closePath();
+  mesh(extrudeX(s, BL + 6), housing.cover, 0, DECK + 126, 0, coverG);
+  mesh(box(BL - 50, 8, 52), M.plug, 0, DECK + 190, 0, coverG);
+  coverG.visible = false;
+}
+
+// ───────────────────────────── коленвал ─────────────────────────────
+const crank = new THREE.Group();
+root.add(crank);
+{
+  const web = new THREE.Shape();
+  web.absarc(0, R, 27, 0, Math.PI, false);
+  web.lineTo(-32, 0);
+  web.absarc(0, 0, 64, Math.PI + 0.28, Math.PI * 2 - 0.28, false);
+  web.lineTo(27, R);
+  const webGeo = extrudeX(web, 11);
+  for (const n of CYLS) {
+    const t = new THREE.Group();
+    t.position.x = cylX(n);
+    t.rotation.x = (OFFSET[n] % 360) * DEG;
+    crank.add(t);
+    mesh(cylXGeo(24, 25), M.steel, 0, R, 0, t);
+    mesh(webGeo, M.forged, -17.5, 0, 0, t);
+    mesh(webGeo, M.forged, 17.5, 0, 0, t);
+  }
+  for (let k = 0; k <= 4; k++) {
+    const left = k === 0 ? -BL / 2 - 6 : cylX(k) + 23;
+    const right = k === 4 ? BL / 2 + 6 : cylX(k + 1) - 23;
+    mesh(cylXGeo(27.5, right - left), M.steel, (left + right) / 2, 0, 0, crank);
+  }
+  mesh(cylXGeo(19, 52), M.steel, -BL / 2 - 30, 0, 0, crank);
+  mesh(cylXGeo(72, 24, 64), M.dark, -BL / 2 - 56, 0, 0, crank);
+  mesh(cylXGeo(40, 28, 48), M.forged, -BL / 2 - 56, 0, 0, crank);
+  mesh(box(6, 14, 6), M.mark, -BL / 2 - 69, 64, 0, crank);
+  mesh(cylXGeo(140, 22, 72), M.forged, BL / 2 + 18, 0, 0, crank);
+  mesh(cylXGeo(143, 14, 72), M.dark, BL / 2 + 18, 0, 0, crank);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    mesh(cylXGeo(5, 24, 12), M.dark, BL / 2 + 19, Math.cos(a) * 44, Math.sin(a) * 44, crank);
+  }
+  mesh(box(8, 18, 8), M.mark, BL / 2 + 30, 128, 0, crank);
+}
+
+// ───────────────────────────── поршни и шатуны ─────────────────────────────
+const pistons = {}, rods = {}, pistonMats = {};
+for (const n of CYLS) {
+  const pm = std(0xb9c0c8, 0.75, 0.35);
+  pistonMats[n] = pm;
+  const p = new THREE.Group();
+  p.position.set(cylX(n), 0, 0);
+  root.add(p);
+  mesh(new THREE.CylinderGeometry(BORE / 2 - 0.6, BORE / 2 - 0.6, 50, 48), pm, 0, 6, 0, p);
+  for (const y of [25, 20.5, 16]) mesh(new THREE.CylinderGeometry(BORE / 2 - 0.3, BORE / 2 - 0.3, 1.6, 48), M.ring, 0, y, 0, p);
+  mesh(cylXGeo(10, 62, 20), M.steel, 0, 0, 0, p);
+  pistons[n] = p;
+
+  const r = new THREE.Group();
+  root.add(r);
+  mesh(cylXGeo(31, 22, 36), M.forged, 0, 0, 0, r);
+  mesh(cylXGeo(15, 22, 28), M.forged, 0, ROD, 0, r);
+  const beam = new THREE.CylinderGeometry(7, 11, ROD - 40, 4).rotateY(Math.PI / 4);
+  mesh(beam, M.forged, 0, ROD / 2, 0, r);
+  mesh(box(30, 6, 66), M.forged, 0, 26, 0, r);
+  rods[n] = r;
+}
+
+// ───────────────────────────── газы в камере и вспышка ─────────────────────────────
+const gasGroup = new THREE.Group();
+root.add(gasGroup);
+const gas = {}, flash = {};
+{
+  const gg = new THREE.CylinderGeometry(BORE / 2 - 1.2, BORE / 2 - 1.2, 1, 40).translate(0, 0.5, 0);
+  const fg = new THREE.SphereGeometry(1, 20, 14);
+  for (const n of CYLS) {
+    gas[n] = mesh(gg, new THREE.MeshBasicMaterial({ color: 0x4ea8ff, transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending }), cylX(n), 0, 0, gasGroup);
+    flash[n] = mesh(fg, new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }), cylX(n), DECK + 3, 0, gasGroup);
+  }
+}
+
+// ───────────────────────────── клапанный механизм DOHC VTEC ─────────────────────────────
+const lobeGeo = {
+  in: { low: lobeGeometry(PROF.in.low, 12), high: lobeGeometry(PROF.in.high, 12) },
+  ex: { low: lobeGeometry(PROF.ex.low, 12), high: lobeGeometry(PROF.ex.high, 12) },
+};
+const springGeo = new THREE.TubeGeometry(new Helix(11, 55, 6.5), 220, 1.7, 6, false);
+const units = { in: {}, ex: {} };
+const shaftMats = {};
+
+for (const side of ['in', 'ex']) {
+  const s = side === 'in' ? -1 : 1;            // впуск со стороны −Z, выпуск +Z
+  const g = new THREE.Group();
+  g.position.set(0, DECK + SEAT_Y, s * SEAT_Z);
+  g.rotation.x = s * TILT;
+  root.add(g);
+
+  mesh(cylXGeo(12.5, BL + 30, 28), M.cam, 0, CAM_Y, s * PAD_Z, g);              // распредвал
+  const sm = std(0xb8bec6, 0.9, 0.3, { emissive: 0x000000 });
+  shaftMats[side] = sm;
+  mesh(cylXGeo(6, BL + 10, 20), sm, 0, PIV_Y, s * PIV_Z, g);                       // ось коромысел (масляный канал VTEC)
+  for (let k = 0; k <= 4; k++) mesh(box(16, 42, 44), M.alu, (k - 2) * PITCH, CAM_Y, s * PAD_Z, g); // постели
+
+  for (const n of CYLS) {
+    const cx = cylX(n);
+    const u = { s, side, valves: [], springs: [], rk: [], pins: [], lobes: [], p: 0, vl: 0 };
+
+    // два клапана, пружины, тарелки
+    for (const j of [-1, 1]) {
+      const vg = new THREE.Group();
+      vg.position.set(cx + j * VX, 0, 0);
+      g.add(vg);
+      const headR = side === 'in' ? 15.5 : 13;
+      const vm = side === 'in' ? M.valveIn : M.valveEx;
+      mesh(new THREE.CylinderGeometry(5, headR, 6, 32), vm, 0, 3, 0, vg);
+      mesh(new THREE.CylinderGeometry(2.8, 2.8, TIP_Y, 12), vm, 0, TIP_Y / 2, 0, vg);
+      mesh(new THREE.CylinderGeometry(11, 8, 5, 24), M.steel, 0, 97.5, 0, vg);
+      u.valves.push(vg);
+      mesh(new THREE.CylinderGeometry(13, 13, 2, 24), M.dark, cx + j * VX, 39, 0, g);
+      u.springs.push(mesh(springGeo, M.spring, cx + j * VX, 40, 0, g));
+    }
+
+    // три коромысла: основное, среднее (под «злым» кулачком), вторичное
+    [-VX, 0, VX].forEach((dx, i) => {
+      const pv = new THREE.Group();
+      pv.position.set(cx + dx, PIV_Y, s * PIV_Z);
+      g.add(pv);
+      const mat = i === 1 ? M.rockerMid : M.rocker;
+      mesh(box(13, 10, PIV_Z), mat, 0, 0, -s * PIV_Z / 2, pv);
+      mesh(cylXGeo(9, 13, 20), mat, 0, 0, 0, pv);
+      mesh(cylXGeo(7, 9, 20), M.steel, 0, 12, -s * PAD_Z, pv);
+      if (i < 2) u.pins.push(mesh(cylXGeo(3.8, 13, 16), M.pin, 0, 0, -s * 34, pv));
+      u.rk.push(pv);
+    });
+
+    // кулачки: низкий — высокий — низкий
+    [['low', -VX], ['high', 0], ['low', VX]].forEach(([k, dx]) => {
+      u.lobes.push({ m: mesh(lobeGeo[side][k], M.cam, cx + dx, CAM_Y, s * PAD_Z, g), p: PROF[side][k] });
+    });
+    units[side][n] = u;
+  }
+}
+
+// ───────────────────────────── режимы отображения ─────────────────────────────
+const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+const VIEWS = [['solid', 'Сплошной'], ['section', 'Разрез'], ['glass', 'Стекло']];
+let viewMode = 'section';
+function setView(mode) {
+  viewMode = mode;
+  const glass = mode === 'glass', sec = mode === 'section';
+  for (const [k, m] of Object.entries(housing)) {
+    m.transparent = glass;
+    m.opacity = glass ? (k === 'liner' ? 0.14 : k === 'cover' ? 0.22 : 0.1) : 1;
+    m.depthWrite = !glass;
+    m.side = glass || sec ? THREE.DoubleSide : THREE.FrontSide;
+    m.clippingPlanes = sec ? [clipPlane] : [];
+    m.needsUpdate = true;
+  }
+  for (const m of [M.rocker, M.rockerMid]) {
+    m.transparent = glass;
+    m.opacity = glass ? 0.45 : 1;
+    m.depthWrite = !glass;
+    m.needsUpdate = true;
+  }
+  gasGroup.visible = mode !== 'solid';
+  syncSeg('viewSeg', mode);
+}
+
+// ───────────────────────────── звук (синтез, Web Audio) ─────────────────────────────
+const audio = {
+  ready: false, enabled: false,
+  init() {
+    const ctx = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.out = ctx.createGain();
+    this.out.gain.value = 0;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -16; comp.knee.value = 12; comp.ratio.value = 5;
+    comp.attack.value = 0.003; comp.release.value = 0.12;
+    this.out.connect(comp).connect(ctx.destination);
+
+    // гармоники вспышек: спад + два «формантных» горба
+    const N = 64, re = new Float32Array(N), im = new Float32Array(N);
+    for (let n = 1; n < N; n++) {
+      im[n] = Math.pow(n, -0.9) * (1 + 0.8 * Math.exp(-((n - 5) ** 2) / 6) + 0.5 * Math.exp(-((n - 11) ** 2) / 10)) * (n % 2 ? 1 : 0.75);
+    }
+    const wave = ctx.createPeriodicWave(re, im);
+    const osc = (type, gain) => {
+      const o = ctx.createOscillator();
+      if (type === 'wave') o.setPeriodicWave(wave); else o.type = type;
+      const g = ctx.createGain();
+      g.gain.value = gain;
+      o.connect(g);
+      o.start();
+      return { o, g };
+    };
+    this.o1 = osc('wave', 0.55);       // частота вспышек
+    this.o2 = osc('wave', 0.22);       // половина: «зерно» от неравномерности цилиндров
+    this.o3 = osc('sawtooth', 0.12);   // лёгкая расстройка
+    this.pre = ctx.createGain();
+    for (const v of [this.o1, this.o2, this.o3]) v.g.connect(this.pre);
+
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < 1024; i++) { const x = (i / 1023) * 2 - 1; curve[i] = Math.tanh(2.2 * x); }
+    shaper.curve = curve;
+    shaper.oversample = '2x';
+    this.lp = ctx.createBiquadFilter(); this.lp.type = 'lowpass';
+    this.peak = ctx.createBiquadFilter(); this.peak.type = 'peaking'; this.peak.Q.value = 1.4;
+    this.hs = ctx.createBiquadFilter(); this.hs.type = 'highshelf'; this.hs.frequency.value = 3200;
+    this.pre.connect(shaper).connect(this.lp).connect(this.peak).connect(this.hs).connect(this.out);
+
+    // шум впуска и «выстрелы» в выпуске
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const noise = () => { const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.start(); return s; };
+    this.bp = ctx.createBiquadFilter(); this.bp.type = 'bandpass'; this.bp.Q.value = 0.8;
+    this.ng = ctx.createGain(); this.ng.gain.value = 0;
+    noise().connect(this.bp).connect(this.ng).connect(this.out);
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 700;
+    this.cg = ctx.createGain(); this.cg.gain.value = 0;
+    noise().connect(hp).connect(this.cg).connect(this.out);
+    this.ready = true;
+  },
+  update(rpm, thr, vtec, cut, live) {
+    if (!this.ready) return;
+    const t = this.ctx.currentTime;
+    const set = (p, v, tc = 0.025) => p.setTargetAtTime(v, t, tc);
+    const f = rpm / 30;                                   // 2 вспышки за оборот
+    const wob = 1 + (Math.random() - 0.5) * 0.004;
+    set(this.o1.o.frequency, f * wob);
+    set(this.o2.o.frequency, f * 0.5 * 1.002);
+    set(this.o3.o.frequency, f * 1.004);
+    set(this.pre.gain, 0.45 + 0.9 * thr);
+    set(this.lp.frequency, 500 + rpm * 0.32 + thr * 700 + vtec * 3800);
+    set(this.lp.Q, 0.8 + vtec * 3);
+    set(this.peak.frequency, 1200 + rpm * 0.15);
+    set(this.peak.gain, vtec * 9 - 2);
+    set(this.hs.gain, vtec * 6);
+    set(this.bp.frequency, 250 + rpm * 0.28 + vtec * 900);
+    set(this.ng.gain, (0.015 + thr * 0.09) * (1 + vtec * 1.5));
+    let level = live && this.enabled ? 0.22 + 0.4 * rpm / LIMIT + 0.18 * thr : 0;
+    if (cut) level *= 0.3;
+    set(this.out.gain, level, cut ? 0.006 : 0.04);
+  },
+  crackle() {
+    if (!this.ready || !this.enabled) return;
+    const t = this.ctx.currentTime, g = this.cg.gain;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(0.0001, t);
+    g.linearRampToValueAtTime(0.35 + Math.random() * 0.45, t + 0.003);
+    g.exponentialRampToValueAtTime(0.0001, t + 0.03 + Math.random() * 0.05);
+  },
+};
+
+// ───────────────────────────── состояние ─────────────────────────────
+let theta = 0;                 // угол коленвала, град (непрерывный)
+let rpm = IDLE, cut = false, vtecCmd = false, vtecSmooth = 0;
+let sliderThr = 0, keyThr = 0, pedalThr = 0, thrSmooth = 0, pedalDown = false;
+const keys = { up: false };
+let paused = false, selCyl = 1, vtecMode = 'auto', camName = 'overview';
+const SPEEDS = [[1, '1×'], [1 / 8, '1/8'], [1 / 40, '1/40'], [1 / 200, '1/200']];
+let timeScale = 1 / 40;
+let lastHighThr = -1e9;
+
+// ───────────────────────────── обновление механики ─────────────────────────────
+const cA = new THREE.Color(), cB = new THREE.Color();
+const C_HOT = new THREE.Color(0xfff0b0), C_FIRE = new THREE.Color(0xff5a1f), C_EMBER = new THREE.Color(0x4a1a0a);
+const C_EXH = new THREE.Color(0x6b5f55), C_IN = new THREE.Color(0x2f7fd8), C_COMP = new THREE.Color(0x7a5cff);
+const rockerAngle = (L, s) => -s * Math.asin(Math.min(L, 40) / PIV_Z);
+
+function updateEngine(dTheta) {
+  crank.rotation.x = theta * DEG;
+  const fast = Math.abs(dTheta) > 300;
+  let flashMax = 0, flashCyl = 1;
+  for (const n of CYLS) {
+    const a = mod(theta - OFFSET[n], 720);
+    const ar = a * DEG, s1 = Math.sin(ar), c1 = Math.cos(ar);
+    const sq = Math.sqrt(ROD * ROD - R * R * s1 * s1);
+    const py = R * c1 + sq;
+    pistons[n].position.y = py;
+    rods[n].position.set(cylX(n), R * c1, R * s1);
+    rods[n].rotation.x = Math.atan2(-R * s1, sq);
+
+    // газ в камере
+    const crown = py + COMP_H, gm = gas[n].material;
+    gas[n].position.y = crown;
+    gas[n].scale.y = Math.max(1, DECK + 5 - crown);
+    if (a < 180 && !cut) {
+      const k = a / 180;
+      if (k < 0.15) cA.copy(C_HOT).lerp(C_FIRE, k / 0.15); else cA.copy(C_FIRE).lerp(C_EMBER, (k - 0.15) / 0.85);
+      gm.color.copy(cA); gm.opacity = 0.75 * (1 - k) + 0.12;
+    } else if (a < 180) {
+      gm.color.copy(C_COMP); gm.opacity = 0.18;
+    } else if (a < 360) {
+      gm.color.copy(C_EXH); gm.opacity = 0.16;
+    } else if (a < 540) {
+      gm.color.copy(C_IN); gm.opacity = 0.2;
+    } else {
+      const k = (a - 540) / 180;
+      gm.color.copy(cB.copy(C_IN).lerp(C_COMP, k)); gm.opacity = 0.2 + 0.2 * k;
+    }
+    const dI = mod(a - IGN, 720);
+    const I = !cut && dI < 90 ? Math.exp(-dI / 14) : 0;
+    flash[n].scale.setScalar(4 + I * 26);
+    flash[n].material.opacity = I;
+    if (I > flashMax) { flashMax = I; flashCyl = n; }
+
+    // клапаны, коромысла, штифты, кулачки
+    for (const side of ['in', 'ex']) {
+      const u = units[side][n], P = PROF[side];
+      const lo = lift(P.low, a), hi = lift(P.high, a);
+      const target = vtecCmd ? 1 : 0;
+      if (fast) u.p = target;
+      else if (u.p !== target && ((lo < 0.02 && hi < 0.02) || (u.p > 0 && u.p < 1))) {
+        u.p = clamp(u.p + Math.sign(target - u.p) * Math.abs(dTheta) / 40, 0, 1);
+      }
+      const locked = u.p > 0.5;
+      const vl = locked ? Math.max(lo, hi) : lo;
+      const ml = locked ? Math.max(lo, hi) : hi;
+      u.vl = vl;
+      for (let j = 0; j < 2; j++) {
+        u.valves[j].position.y = -vl;
+        u.springs[j].scale.y = (95 - vl - 40) / 55;
+      }
+      u.rk[0].rotation.x = rockerAngle(vl, u.s);
+      u.rk[2].rotation.x = rockerAngle(vl, u.s);
+      u.rk[1].rotation.x = rockerAngle(ml, u.s);
+      u.pins[0].position.x = u.p * 8.5;
+      u.pins[1].position.x = u.p * 8.5;
+      for (const l of u.lobes) l.m.rotation.x = ((theta - OFFSET[n] - l.p.c) / 2) * DEG;
+    }
+  }
+  const fp = new THREE.Vector3(cylX(flashCyl) * MM, (DECK + 2) * MM, 0);
+  flashLight.position.copy(fp);
+  flashLight.intensity = viewMode === 'solid' ? 0 : flashMax * 6;
+}
+
+// ───────────────────────────── интерфейс ─────────────────────────────
+const $ = id => document.getElementById(id);
+function makeSeg(id, items, current, onPick) {
+  const el = $(id);
+  el.innerHTML = '';
+  for (const [v, label] of items) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.dataset.v = String(v);
+    if (v === current) b.classList.add('on');
+    b.addEventListener('click', () => onPick(v));
+    el.appendChild(b);
+  }
+}
+function syncSeg(id, v) {
+  for (const b of $(id).children) b.classList.toggle('on', b.dataset.v === String(v));
+}
+
+const CAMS = [['overview', 'Общий'], ['head', 'ГБЦ'], ['vtec', 'VTEC'], ['side', 'Спереди'], ['bottom', 'Низ']];
+makeSeg('speedSeg', SPEEDS, timeScale, v => { timeScale = v; syncSeg('speedSeg', v); });
+makeSeg('viewSeg', VIEWS, viewMode, setView);
+makeSeg('camSeg', CAMS, camName, v => camPreset(v));
+makeSeg('vtecSeg', [['auto', 'Авто'], ['off', 'Выкл'], ['on', 'Вкл']], vtecMode, v => { vtecMode = v; syncSeg('vtecSeg', v); });
+
+const orderEl = $('order');
+for (const n of FIRING) {
+  const b = document.createElement('button');
+  b.className = 'chip';
+  b.textContent = n;
+  b.dataset.n = n;
+  b.addEventListener('click', () => selectCyl(n));
+  orderEl.appendChild(b);
+}
+function selectCyl(n) {
+  selCyl = n;
+  for (const b of orderEl.children) b.classList.toggle('sel', +b.dataset.n === n);
+  for (const m of CYLS) pistonMats[m].emissive.setHex(m === n ? 0x3a2600 : 0x000000);
+  $('selCyl').textContent = n;
+  if (camName === 'vtec' || camName === 'bottom') camPreset(camName);
+}
+
+const thrEl = $('thr');
+thrEl.addEventListener('input', () => { sliderThr = thrEl.value / 100; });
+const pedal = $('pedal');
+const pedalOn = e => { pedalDown = true; pedal.classList.add('down'); if (e.pointerId !== undefined) pedal.setPointerCapture(e.pointerId); e.preventDefault(); };
+const pedalOff = () => { pedalDown = false; pedal.classList.remove('down'); };
+pedal.addEventListener('pointerdown', pedalOn);
+pedal.addEventListener('pointerup', pedalOff);
+pedal.addEventListener('pointercancel', pedalOff);
+pedal.addEventListener('contextmenu', e => e.preventDefault());
+
+const coverBtn = $('cover');
+coverBtn.addEventListener('click', () => { coverG.visible = !coverG.visible; coverBtn.classList.toggle('on', coverG.visible); });
+const pauseBtn = $('pause');
+function togglePause() { paused = !paused; pauseBtn.classList.toggle('on', paused); pauseBtn.textContent = paused ? 'Пуск' : 'Пауза'; }
+pauseBtn.addEventListener('click', togglePause);
+const soundBtn = $('sound');
+function toggleSound() {
+  if (!audio.ready) audio.init();
+  audio.ctx.resume();
+  audio.enabled = !audio.enabled;
+  soundBtn.textContent = audio.enabled ? 'Звук: вкл' : 'Звук: выкл';
+  soundBtn.classList.remove('hint');
+  soundBtn.classList.toggle('on', audio.enabled);
+}
+soundBtn.addEventListener('click', toggleSound);
+$('phasesBtn').addEventListener('click', () => { $('right').classList.toggle('open'); $('phasesBtn').classList.toggle('on'); });
+
+const nextOf = (list, v) => list[(list.findIndex(x => x[0] === v) + 1) % list.length][0];
+window.addEventListener('keydown', e => {
+  if (e.code === 'KeyW' || e.code === 'ArrowUp') { keys.up = true; e.preventDefault(); }
+  else if (e.code === 'Space') { togglePause(); e.preventDefault(); }
+  else if (e.code === 'KeyV') setView(nextOf(VIEWS, viewMode));
+  else if (e.code === 'KeyC') camPreset(nextOf(CAMS, camName));
+  else if (e.code === 'KeyM') toggleSound();
+  else if (/^Digit[1-4]$/.test(e.code)) selectCyl(+e.code.slice(5));
+});
+window.addEventListener('keyup', e => { if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.up = false; });
+window.addEventListener('blur', () => { keys.up = false; pedalOff(); });
+
+function readPad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const p of pads) if (p && p.buttons && p.buttons[7] && p.buttons[7].value > 0.02) return p.buttons[7].value;
+  return 0;
+}
+
+// камера
+let tween = null;
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+function flyTo(pos, tgt) { tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: tgt, k: 0 }; }
+controls.addEventListener('start', () => { tween = null; });
+function camPreset(name) {
+  camName = name;
+  syncSeg('camSeg', name);
+  const cx = cylX(selCyl) * MM;
+  if (name === 'overview') flyTo(V(7.0, 4.6, 9.2), V(0, 1.3, 0));
+  else if (name === 'head') flyTo(V(2.4, 6.4, 4.0), V(0, 3.6, 0));
+  else if (name === 'vtec') {
+    const t = new THREE.Vector3();
+    units.in[selCyl].rk[1].getWorldPosition(t);
+    flyTo(t.clone().add(V(1.35, 1.9, 1.25)), t.clone().add(V(0, 0.05, 0)));
+  }
+  else if (name === 'side') flyTo(V(-10.5, 1.8, 0.8), V(0, 1.4, 0));
+  else if (name === 'bottom') flyTo(V(cx + 1.6, -0.5, 3.4), V(cx, 0.6, 0));
+}
+
+// тахометр
+const tach = $('tach'), tx = tach.getContext('2d');
+function drawTach() {
+  const W = tach.width, H = tach.height, n = 45, x0 = 6, x1 = W - 6, sw = (x1 - x0) / n, base = 72;
+  tx.clearRect(0, 0, W, H);
+  for (let i = 0; i < n; i++) {
+    const r0 = i * 200;
+    const top = 8 + (1 - i / (n - 1)) * 34;
+    tx.globalAlpha = rpm > r0 + 60 ? 1 : 0.1;
+    tx.fillStyle = r0 >= 8000 ? '#ff3b3b' : r0 >= 6000 ? '#ffb21e' : '#e9edf2';
+    tx.fillRect(x0 + i * sw, top, sw - 3, base - top);
+  }
+  tx.globalAlpha = 1;
+  tx.fillStyle = '#8b95a3';
+  tx.font = '600 20px ui-monospace, Consolas, monospace';
+  tx.textAlign = 'center';
+  for (let k = 0; k <= 9; k++) tx.fillText(String(k), Math.min(x0 + k * 5 * sw + 6, W - 10), 98);
+}
+
+// график подъёма клапанов
+const liftC = $('lift'), lx = liftC.getContext('2d');
+const IN_C = '#4ea8ff', EX_C = '#ff7a45';
+function activeLift(side, locked, a) {
+  const P = PROF[side];
+  return locked ? Math.max(lift(P.low, a), lift(P.high, a)) : lift(P.low, a);
+}
+const overlapCache = {};
+function overlapDeg(inL, exL) {
+  const key = `${inL}${exL}`;
+  if (overlapCache[key] === undefined) {
+    let c = 0;
+    for (let a = 0; a < 720; a++) if (activeLift('in', inL, a) > 0.05 && activeLift('ex', exL, a) > 0.05) c++;
+    overlapCache[key] = c;
+  }
+  return overlapCache[key];
+}
+function drawLift() {
+  const W = liftC.width, H = liftC.height, pl = 46, pr = 12, pt = 30, pb = 44;
+  const gw = W - pl - pr, gh = H - pt - pb, maxL = 12;
+  const X = a => pl + (a / 720) * gw, Y = l => pt + gh - (l / maxL) * gh;
+  lx.clearRect(0, 0, W, H);
+  const names = ['рабочий ход', 'выпуск', 'впуск', 'сжатие'];
+  lx.font = '20px system-ui, sans-serif';
+  lx.textAlign = 'center';
+  for (let i = 0; i < 4; i++) {
+    if (i % 2 === 0) { lx.fillStyle = 'rgba(255,255,255,.035)'; lx.fillRect(X(i * 180), pt, gw / 4, gh); }
+    lx.fillStyle = '#8b95a3';
+    lx.fillText(names[i], X(i * 180 + 90), H - 12);
+  }
+  lx.strokeStyle = 'rgba(255,255,255,.08)';
+  lx.lineWidth = 1;
+  lx.textAlign = 'right';
+  for (let l = 0; l <= 12; l += 4) {
+    lx.beginPath(); lx.moveTo(pl, Y(l)); lx.lineTo(W - pr, Y(l)); lx.stroke();
+    lx.fillStyle = '#5f6875'; lx.fillText(l + (l === 12 ? ' мм' : ''), pl - 6, Y(l) + 6);
+  }
+  lx.textAlign = 'center';
+  for (let a = 0; a <= 720; a += 180) {
+    lx.beginPath(); lx.moveTo(X(a), pt); lx.lineTo(X(a), pt + gh); lx.stroke();
+    lx.fillStyle = '#5f6875';
+    lx.fillText(a % 360 === 0 ? 'ВМТ' : 'НМТ', Math.min(Math.max(X(a), pl + 20), W - pr - 22), pt - 8);
+  }
+  const uIn = units.in[selCyl], uEx = units.ex[selCyl];
+  const inL = uIn.p > 0.5, exL = uEx.p > 0.5;
+  // перекрытие
+  lx.fillStyle = 'rgba(255,178,30,.22)';
+  lx.beginPath();
+  lx.moveTo(X(0), Y(0));
+  for (let a = 0; a <= 720; a += 2) lx.lineTo(X(a), Y(Math.min(activeLift('in', inL, a), activeLift('ex', exL, a))));
+  lx.lineTo(X(720), Y(0));
+  lx.fill();
+  const curve = (p, color, active) => {
+    lx.beginPath();
+    for (let a = 0; a <= 720; a += 3) { const y = Y(lift(p, a)); a ? lx.lineTo(X(a), y) : lx.moveTo(X(a), y); }
+    lx.strokeStyle = color;
+    lx.globalAlpha = active ? 1 : 0.25;
+    lx.lineWidth = active ? 4 : 2.5;
+    lx.setLineDash(active ? [] : [8, 7]);
+    lx.stroke();
+    lx.globalAlpha = 1;
+    lx.setLineDash([]);
+  };
+  curve(PROF.ex.low, EX_C, !exL); curve(PROF.ex.high, EX_C, exL);
+  curve(PROF.in.low, IN_C, !inL); curve(PROF.in.high, IN_C, inL);
+  const a = mod(theta - OFFSET[selCyl], 720);
+  lx.strokeStyle = '#fff'; lx.lineWidth = 2;
+  lx.beginPath(); lx.moveTo(X(a), pt); lx.lineTo(X(a), pt + gh); lx.stroke();
+  for (const [u, c] of [[uIn, IN_C], [uEx, EX_C]]) {
+    lx.fillStyle = c; lx.beginPath(); lx.arc(X(a), Y(u.vl), 7, 0, Math.PI * 2); lx.fill();
+    lx.strokeStyle = '#0a0c0f'; lx.lineWidth = 2; lx.stroke();
+  }
+}
+
+const STROKES = ['рабочий ход', 'выпуск', 'впуск', 'сжатие'];
+const pinDots = [...document.querySelectorAll('#pins .dot')];
+const fmt = new Intl.NumberFormat('ru-RU');
+function updateUI() {
+  $('rpm').textContent = fmt.format(Math.round(rpm / 10) * 10);
+  $('rpmBox').classList.toggle('cut', cut);
+  $('lamp').classList.toggle('on', vtecCmd);
+  $('thrVal').textContent = Math.round(thrSmooth * 100) + '%';
+  $('crankA').textContent = Math.round(mod(theta, 720)) + '°';
+  $('mps').textContent = ((2 * STROKE / 1000) * rpm / 60).toFixed(1).replace('.', ',') + ' м/с';
+  let locked = 0;
+  for (const s of ['in', 'ex']) for (const n of CYLS) if (units[s][n].p > 0.5) locked++;
+  $('camMode').textContent = locked === 8 ? 'высокий (VTEC)' : locked === 0 ? 'низкий' : `переключение ${locked}/8`;
+  $('oil').textContent = vtecCmd ? 'давление подано' : 'нет давления';
+  for (const d of pinDots) {
+    const p = units[d.dataset.s][d.dataset.n].p;
+    d.style.background = p > 0.01 ? `rgba(255,178,30,${0.25 + 0.75 * p})` : '';
+    d.style.boxShadow = p > 0.5 ? '0 0 8px rgba(255,178,30,.7)' : '';
+  }
+  const a = mod(theta - OFFSET[selCyl], 720);
+  const st = STROKES[Math.floor(a / 180)];
+  $('strokeName').textContent = a < 180 && cut ? st + ' (отсечка топлива)' : st;
+  for (const b of orderEl.children) b.classList.toggle('fire', mod(theta - OFFSET[+b.dataset.n], 720) < 180);
+  const uIn = units.in[selCyl], uEx = units.ex[selCyl];
+  $('lifts').textContent = `${uIn.vl.toFixed(1).replace('.', ',')} / ${uEx.vl.toFixed(1).replace('.', ',')} мм`;
+  $('overlap').textContent = overlapDeg(uIn.p > 0.5, uEx.p > 0.5) + '°';
+  drawTach();
+  drawLift();
+}
+
+// ───────────────────────────── цикл ─────────────────────────────
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.fov = camera.aspect < 1 ? Math.min(64, 34 / Math.max(camera.aspect, 0.5)) : 34;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+const approach = (v, t, step) => (v < t ? Math.min(t, v + step) : Math.max(t, v - step));
+let last = performance.now(), uiAcc = 0;
+function tick(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  keyThr = approach(keyThr, keys.up ? 1 : 0, dt * 5);
+  pedalThr = approach(pedalThr, pedalDown ? 1 : 0, dt * 6);
+  const thr = Math.max(sliderThr, keyThr, pedalThr, readPad());
+  thrSmooth += (thr - thrSmooth) * Math.min(1, dt * 12);
+
+  if (cut) {
+    rpm -= 5200 * dt;
+    if (rpm < LIMIT - 260) cut = false;
+  } else {
+    const target = IDLE + thrSmooth * (LIMIT + 500 - IDLE);
+    const k = target > rpm ? 1.6 + 3.2 * thrSmooth : 1.4;
+    rpm += (target - rpm) * Math.min(1, k * dt);
+    if (rpm >= LIMIT) { rpm = LIMIT; cut = true; if (Math.random() < 0.5) audio.crackle(); }
+  }
+
+  if (vtecMode === 'on') vtecCmd = true;
+  else if (vtecMode === 'off') vtecCmd = false;
+  else if (!vtecCmd && rpm >= VTEC_ON) vtecCmd = true;
+  else if (vtecCmd && rpm < VTEC_OFF) vtecCmd = false;
+  vtecSmooth += ((vtecCmd ? 1 : 0) - vtecSmooth) * Math.min(1, dt * 20);
+
+  if (thrSmooth > 0.6 && rpm > 5000) lastHighThr = now;
+  if (thrSmooth < 0.08 && now - lastHighThr < 1400 && rpm > 3500 && Math.random() < dt * 9) audio.crackle();
+
+  const dTheta = paused ? 0 : (rpm / 60) * 360 * dt * timeScale;
+  theta += dTheta;
+  updateEngine(dTheta);
+  for (const s of ['in', 'ex']) shaftMats[s].emissive.setRGB(0.05 * vtecSmooth, 0.25 * vtecSmooth, 0.7 * vtecSmooth);
+  audio.update(rpm, thrSmooth, vtecSmooth, cut, !paused);
+
+  if (tween) {
+    tween.k = Math.min(1, tween.k + dt / 0.9);
+    const e = tween.k < 0.5 ? 4 * tween.k ** 3 : 1 - (-2 * tween.k + 2) ** 3 / 2;
+    camera.position.lerpVectors(tween.p0, tween.p1, e);
+    controls.target.lerpVectors(tween.t0, tween.t1, e);
+    if (tween.k >= 1) tween = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+
+  uiAcc += dt;
+  if (uiAcc > 1 / 30) { uiAcc = 0; updateUI(); }
+  requestAnimationFrame(tick);
+}
+
+setView(viewMode);
+selectCyl(1);
+updateEngine(0);
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
